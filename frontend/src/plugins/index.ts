@@ -1,0 +1,5 @@
+export { pluginRegistry } from './registry'
+export type { TripCraftPlugin, PluginMeta, PluginSlot, PluginContext } from './types'
+export { QuickFactsPlugin } from './builtin/QuickFacts'
+export { WeatherDetailPlugin } from './builtin/WeatherDetail'
+export { CostDashboardPlugin } from './builtin/CostDashboard'

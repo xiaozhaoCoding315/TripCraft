@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import Settings
+from app.models.travel import RagDocument
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +257,150 @@ DESTINATION_SEED_DATA: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "南京": {
+        "attractions": [
+            {
+                "name": "中山陵",
+                "type": "历史文化",
+                "description": "孙中山先生陵寝，位于紫金山南麓。建筑宏伟，象征三民主义。",
+                "tips": "周一闭馆。免费但需提前预约，建议早上去避开人流。",
+            },
+            {
+                "name": "夫子庙",
+                "type": "历史文化",
+                "description": "中国四大文庙之一，秦淮河畔的标志性建筑群。",
+                "tips": "夜景比白天更有韵味，秦淮河夜游体验佳。商业化较重但小吃丰富。",
+            },
+            {
+                "name": "明孝陵",
+                "type": "世界文化遗产",
+                "description": "明太祖朱元璋陵寝，神道石像生是南京标志性景观。",
+                "tips": "石像路秋天极美。神道全程步行约30分钟，建议与中山陵安排同一天。",
+            },
+            {
+                "name": "总统府",
+                "type": "近代史",
+                "description": "中国近代史遗址博物馆，见证太平天国、民国政府等历史。",
+                "tips": "建议请讲解或租语音导览。预留2-3小时游览。",
+            },
+            {
+                "name": "玄武湖",
+                "type": "自然风光",
+                "description": "中国最大的皇家园林湖泊，免费开放的城市公园。",
+                "tips": "适合傍晚散步。可远眺紫金山和明城墙。环湖骑行约1小时。",
+            },
+        ],
+        "travel_notes": [
+            {
+                "title": "南京3日游攻略",
+                "content": "Day1 中山陵+明孝陵+美龄宫；Day2 总统府+南京博物院+1912街区；Day3 夫子庙+秦淮河夜游+老门东。住宿选在新街口或夫子庙附近。",
+            },
+            {
+                "title": "南京美食指南",
+                "content": "必吃：鸭血粉丝汤、盐水鸭、牛肉锅贴、小笼包。推荐：回味鸭血粉丝、韩复兴盐水鸭、蒋有记锅贴。夫子庙小吃多但偏贵，老门东更地道。",
+            },
+            {
+                "title": "南京历史贴士",
+                "content": "南京博物院免费但需提前3天预约，周一闭馆。明孝陵神道和中山陵步行相连，建议安排半天。城墙骑行从中华门段最美。",
+            },
+        ],
+    },
+    "重庆": {
+        "attractions": [
+            {
+                "name": "洪崖洞",
+                "type": "城市地标",
+                "description": "依山而建的吊脚楼群，被誉为现实版《千与千寻》。11层立体建筑。",
+                "tips": "晚上亮灯后（约19:00-23:00）最壮观。从1楼到11楼都是平地出入，立体魔幻。",
+            },
+            {
+                "name": "长江索道",
+                "type": "交通体验",
+                "description": "横跨长江的空中客运索道，被誉为“万里长江第一条空中走廊”。",
+                "tips": "避开早晚高峰。建议傍晚乘坐，可看日落和夜景。单程约4分钟。",
+            },
+            {
+                "name": "磁器口古镇",
+                "type": "历史文化",
+                "description": "千年古镇，保存完好的明清建筑群，重庆的“小重庆”。",
+                "tips": "商业化较重，建议去后街小巷寻找本地特色。陈麻花必尝。可安排2-3小时。",
+            },
+            {
+                "name": "武隆天坑",
+                "type": "自然风光",
+                "description": "世界自然遗产，《变形金刚4》《满城尽带黄金甲》取景地。",
+                "tips": "距市区约3小时车程，建议预留一天。必须跟团或包车前往。",
+            },
+            {
+                "name": "白公馆",
+                "type": "红色文化",
+                "description": "原四川军阀白驹的香山别墅，后为国民党特务机关监狱，关押过小萝卜头等革命烈士。",
+                "tips": "与渣滓洞相距不远，建议一起参观。免费参观，周一闭馆。",
+            },
+        ],
+        "travel_notes": [
+            {
+                "title": "重庆3日游攻略",
+                "content": "Day1 解放碑+洪崖洞+长江索道；Day2 磁器口古镇+白公馆+渣滓洞；Day3 武隆天坑仙女山一日游。住宿选在解放碑或观音桥商圈。",
+            },
+            {
+                "title": "重庆火锅地图",
+                "content": "必吃火锅，重庆火锅以牛油锅底为主，九宫格是特色。推荐：珮姐老火锅、周师兄大刀腰片、楠火锅。微辣对外地人已足够辣，建议鸳鸯锅。",
+            },
+            {
+                "title": "重庆交通建议",
+                "content": "重庆是山城，导航距离和实际步行距离差异大。轻轨是最佳出行方式，2号线和3号线可观江景。打车容易迷路，建议选轻轨+步行。",
+            },
+        ],
+    },
+    "苏州": {
+        "attractions": [
+            {
+                "name": "拙政园",
+                "type": "世界文化遗产",
+                "description": "中国四大名园之一，苏州园林的代表作。以水为中心，山水萦绕。",
+                "tips": "建议游览2小时。旺季（4-5月、9-10月）人多。可租讲解了解造园美学。",
+            },
+            {
+                "name": "虎丘",
+                "type": "历史文化",
+                "description": "吴中第一名胜，苏东坡云'到苏州不游虎丘，乃憾事也'。虎丘塔是中国第一斜塔。",
+                "tips": "建议游览1.5小时。春季虎丘花会值得一看。云岩寺塔不可登塔。",
+            },
+            {
+                "name": "平江路",
+                "type": "历史街区",
+                "description": "苏州保存最完整的古街区，河街相邻、水陆并行。",
+                "tips": "早上人少，适合拍照。沿河茶馆可品茶听评弹。商业化程度适中。",
+            },
+            {
+                "name": "周庄古镇",
+                "type": "水乡古镇",
+                "description": "中国第一水乡，双桥、沈厅、张厅是标志性景点。",
+                "tips": "距苏州市区约1小时车程。建议傍晚去，游客少且夜景美。万三蹄是特色美食。",
+            },
+            {
+                "name": "苏州博物馆",
+                "type": "文化场馆",
+                "description": "贝聿铭晚期代表作，现代建筑与苏州园林美学的完美结合。",
+                "tips": "免费但需提前预约，周一闭馆。建筑本身比展品更值得看。紧邻拙政园可一起游览。",
+            },
+        ],
+        "travel_notes": [
+            {
+                "title": "苏州3日游攻略",
+                "content": "Day1 拙政园+苏州博物馆+平江路；Day2 虎丘+寒山寺+山塘街；Day3 周庄古镇或同里古镇一日游。住宿选在观前街或平江路附近。",
+            },
+            {
+                "title": "苏州美食推荐",
+                "content": "必吃：苏式汤面、松鼠桂鱼、蟹粉小笼、阳澄湖大闸蟹（秋季）。推荐：同得兴精品面馆、松鹤楼。偏甜口味，不甜不正宗。",
+            },
+            {
+                "title": "苏州园林游览建议",
+                "content": "苏州园林各有特色：拙政园宏大、留园精致、狮子林假山群、沧野趣。建议选1-2个精听讲解，比走马观花效果好得多。坐船游古城河是独特体验。",
+            },
+        ],
+    },
 }
 
 
@@ -302,54 +447,67 @@ class SeedDataService:
             logger.warning(f"Failed to seed RAG data: {exc}")
 
     async def _seed_data(self, rag: Any) -> None:
-        """Seed all destination data"""
+        """Seed all destination data — 修复：使用标准 ingest API（双写 dense+sparse）。
+
+        旧代码直接调用 rag.qdrant.upsert / rag.embedder.embed_query，但这些属性在
+        TravelRagService 上不存在（qdrant 是私有 client，embed 是实例方法非 embedder）。
+        现改为通过 ingest_notes / ingest_attractions 标准接口导入，自动走预处理管线
+        （Markdown 清洗 + 分块 + 实体抽取）和双索引同步写入。
+        """
         total_attractions = 0
         total_notes = 0
 
         for destination, data in DESTINATION_SEED_DATA.items():
-            # Seed attractions
+            # Seed attractions: 聚合为一个文档批量导入
+            attraction_docs: list[RagDocument] = []
             for attraction in data.get("attractions", []):
-                try:
-                    doc = {
-                        "text": f"{attraction['name']} - {attraction['type']}\n{attraction['description']}\n\n贴士：{attraction['tips']}",
-                        "destination": destination,
-                        "type": "attraction",
-                        "name": attraction["name"],
-                    }
-                    rag.qdrant.upsert(
-                        collection_name="travel_notes",
-                        points=[{
-                            "id": hash(f"{destination}_{attraction['name']}"),
-                            "vector": rag.embedder.embed_query(doc["text"]),
-                            "payload": doc,
-                        }],
-                    )
-                    total_attractions += 1
-                except Exception as exc:
-                    logger.debug(f"Failed to seed attraction {attraction['name']}: {exc}")
+                text = (
+                    f"《{attraction['name']}》是{destination}的{attraction['type']}类景点。"
+                    f"{attraction['description']}\n\n"
+                    f"游玩贴士：{attraction['tips']}\n\n"
+                    f"建议游玩时长：2-3小时。门票信息请关注官方公告。"
+                )
+                attraction_docs.append(RagDocument(
+                    id=f"seed_attraction_{destination}_{attraction['name']}",
+                    title=attraction["name"],
+                    text=text,
+                    city=destination,
+                    source="seed_data",
+                    tags=["attraction", attraction["type"], destination],
+                ))
 
-            # Seed travel notes
+            if attraction_docs:
+                try:
+                    # 每个景点单独导入（保持 doc_key 独立）
+                    for doc in attraction_docs:
+                        resp = await rag.ingest_attractions(destination, [doc])
+                        if resp.inserted > 0:
+                            total_attractions += 1
+                except Exception as exc:
+                    logger.warning(f"Failed to seed attractions for {destination}: {exc}")
+
+            # Seed travel notes: 聚合导入
+            note_docs: list[RagDocument] = []
             for note in data.get("travel_notes", []):
-                try:
-                    doc = {
-                        "text": f"{note['title']}\n\n{note['content']}",
-                        "destination": destination,
-                        "type": "travel_note",
-                        "title": note["title"],
-                    }
-                    rag.qdrant.upsert(
-                        collection_name="travel_notes",
-                        points=[{
-                            "id": hash(f"{destination}_{note['title']}"),
-                            "vector": rag.embedder.embed_query(doc["text"]),
-                            "payload": doc,
-                        }],
-                    )
-                    total_notes += 1
-                except Exception as exc:
-                    logger.debug(f"Failed to seed note {note['title']}: {exc}")
+                note_docs.append(RagDocument(
+                    id=f"seed_note_{destination}_{note['title']}",
+                    title=note["title"],
+                    text=f"{note['title']}\n\n{note['content']}",
+                    city=destination,
+                    source="seed_data",
+                    tags=["travel_note", destination],
+                ))
 
-        logger.info(f"Seeded {total_attractions} attractions and {total_notes} travel notes")
+            if note_docs:
+                try:
+                    for doc in note_docs:
+                        resp = await rag.ingest_notes(destination, [doc])
+                        if resp.inserted > 0:
+                            total_notes += 1
+                except Exception as exc:
+                    logger.warning(f"Failed to seed notes for {destination}: {exc}")
+
+        logger.info(f"Seeded {total_attractions} attractions and {total_notes} travel notes (dual-write to Qdrant + rag_chunks)")
 
 
 async def seed_rag_data(settings: Settings) -> None:

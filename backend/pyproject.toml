@@ -28,12 +28,16 @@ dev = [
   "pytest>=8.3.0",
   "pytest-asyncio>=0.24.0",
   "ruff>=0.6.0",
+  "ragas>=0.2.0",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "integration: 需要外部服务的集成测试 (Qdrant/PostgreSQL/DashScope)",
+]
 
 [tool.ruff]
 line-length = 100

@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any, AsyncIterator
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import Settings, get_settings
@@ -95,8 +95,62 @@ class PersistenceService:
         # 创建表（如果不存在）
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            await self._ensure_rag_chunks_ddl(conn)
 
         logger.info("PostgreSQL persistence service initialized")
+
+    @staticmethod
+    async def _ensure_rag_chunks_ddl(conn: Any) -> None:
+        """创建 rag_chunks 表及全文搜索索引（幂等，可重复执行）。
+
+        包含 RagChunk ORM 模型对应的表结构 + tsvector generated column + GIN 索引。
+        使用原始 DDL 而非 Alembic（项目无迁移基础设施）。
+        """
+        ddl_statements = [
+            """
+            CREATE TABLE IF NOT EXISTS rag_chunks (
+                id            TEXT PRIMARY KEY,
+                collection    VARCHAR(128) NOT NULL,
+                city          TEXT NOT NULL,
+                title         VARCHAR(512),
+                text          TEXT NOT NULL,
+                tags          JSONB NOT NULL DEFAULT '[]',
+                source        VARCHAR(512),
+                metadata      JSONB NOT NULL DEFAULT '{}',
+                chunk_index   INTEGER NOT NULL DEFAULT 0,
+                doc_key       TEXT NOT NULL,
+                entities      JSONB NOT NULL DEFAULT '{}',
+                created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """,
+            # 城市 + 集合索引
+            "CREATE INDEX IF NOT EXISTS rag_chunks_city_idx ON rag_chunks (city)",
+            "CREATE INDEX IF NOT EXISTS rag_chunks_collection_city_idx ON rag_chunks (collection, city)",
+            # tsvector generated column (BM25 全文索引) — 仅当列不存在时添加
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'rag_chunks' AND column_name = 'search_vector'
+                ) THEN
+                    ALTER TABLE rag_chunks
+                      ADD COLUMN search_vector tsvector
+                      GENERATED ALWAYS AS (to_tsvector('simple', coalesce(text, ''))) STORED;
+                END IF;
+            END$$;
+            """,
+            # GIN 索引用于全文搜索
+            "CREATE INDEX IF NOT EXISTS rag_chunks_search_vector_idx ON rag_chunks USING GIN (search_vector)",
+            # trigram 扩展 + 索引（CJK 子串匹配加速）
+            "CREATE EXTENSION IF NOT EXISTS pg_trgm",
+            "CREATE INDEX IF NOT EXISTS rag_chunks_text_trgm_idx ON rag_chunks USING GIN (text gin_trgm_ops)",
+        ]
+        for stmt in ddl_statements:
+            try:
+                await conn.execute(text(stmt))
+            except Exception as exc:
+                logger.warning(f"RAG chunk DDL step skipped: {exc}")
 
     async def _close_engine(self) -> None:
         """关闭旧的引擎"""
@@ -531,6 +585,121 @@ class PersistenceService:
         async with self.session() as session:
             result = await session.execute(select(User).where(User.id == user_id))
             return result.scalar_one_or_none()
+
+    # ==================== RAG Chunks 双写 / BM25 检索 ====================
+
+    async def upsert_rag_chunks(self, rows: Iterable[dict[str, Any]]) -> int:
+        """批量 upsert rag_chunks 记录（双写 dense + sparse 索引的 PG 侧）。
+
+        使用 INSERT ... ON CONFLICT DO UPDATE 保证幂等性。
+        部分行失败不影响整体（逐行 savepoint）。
+        """
+        from app.models.rag_chunk_models import RagChunk
+
+        count = 0
+        async with self.session() as session:
+            for row in rows:
+                now = datetime.now(UTC)
+                stmt = text(
+                    """
+                    INSERT INTO rag_chunks
+                        (id, collection, city, title, text, tags, source, metadata,
+                         chunk_index, doc_key, entities, created_at)
+                    VALUES
+                        (:id, :collection, :city, :title, :text, :tags::jsonb, :source,
+                         :metadata::jsonb, :chunk_index, :doc_key, :entities::jsonb, :created_at)
+                    ON CONFLICT (id) DO UPDATE SET
+                        text = EXCLUDED.text,
+                        title = EXCLUDED.title,
+                        tags = EXCLUDED.tags,
+                        source = EXCLUDED.source,
+                        metadata = EXCLUDED.metadata,
+                        chunk_index = EXCLUDED.chunk_index,
+                        doc_key = EXCLUDED.doc_key,
+                        entities = EXCLUDED.entities
+                    """
+                )
+                await session.execute(
+                    stmt,
+                    {
+                        "id": row["id"],
+                        "collection": row.get("collection", "travel_notes"),
+                        "city": row.get("city", ""),
+                        "title": row.get("title"),
+                        "text": row.get("text", ""),
+                        "tags": json.dumps(row.get("tags", []), ensure_ascii=False),
+                        "source": row.get("source"),
+                        "metadata": json.dumps(row.get("metadata", {}), ensure_ascii=False),
+                        "chunk_index": row.get("chunk_index", 0),
+                        "doc_key": row.get("doc_key", ""),
+                        "entities": json.dumps(row.get("entities", {}), ensure_ascii=False),
+                        "created_at": now,
+                    },
+                )
+                count += 1
+            await session.commit()
+        return count
+
+    async def sparse_search_chunks(
+        self,
+        collection: str,
+        city: str,
+        query: str,
+        limit: int = 18,
+    ) -> list[tuple[str, float, dict[str, Any]]]:
+        """BM25 稀疏关键词检索（PostgreSQL ts_rank_cd）。
+
+        返回 [(chunk_id, bm25_score, payload_dict), ...] 按分数降序。
+        查询失败时返回空列表（调用方应继续降级处理）。
+
+        Args:
+            collection: 集合名 (travel_notes / attractions)
+            city: 城市过滤
+            query: 原始查询文本
+            limit: 返回条数上限（融合前通常 3x 最终 limit）
+        """
+        if not query or not query.strip():
+            return []
+
+        stmt = text(
+            """
+            SELECT id, city, text, title, source, tags, metadata, chunk_index, entities,
+                   ts_rank_cd(search_vector, websearch_to_tsquery('simple', :query)) AS bm25
+            FROM rag_chunks
+            WHERE collection = :collection
+              AND city = :city
+              AND search_vector @@ websearch_to_tsquery('simple', :query)
+            ORDER BY bm25 DESC
+            LIMIT :limit
+            """
+        )
+
+        try:
+            async with self.session() as session:
+                result = await session.execute(
+                    stmt,
+                    {"collection": collection, "city": city, "query": query.strip(), "limit": limit},
+                )
+                rows = result.fetchall()
+        except Exception as exc:
+            logger.debug(f"Sparse search failed (degrading to dense-only): {exc}")
+            return []
+
+        results: list[tuple[str, float, dict[str, Any]]] = []
+        for row in rows:
+            row_dict = {
+                "id": row[0],
+                "city": row[1],
+                "text": row[2],
+                "title": row[3],
+                "source": row[4],
+                "tags": row[5] or [],
+                "metadata": row[6] or {},
+                "chunk_index": row[7],
+                "entities": row[8] or {},
+            }
+            results.append((row[0], float(row[9] or 0.0), row_dict))
+        return results
 
 
 def get_persistence(settings: Settings | None = None) -> PersistenceService:

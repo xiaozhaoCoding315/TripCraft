@@ -77,6 +77,34 @@ class Settings(BaseSettings):
         description="Critic Agent 最大审查轮数",
     )
 
+    # ========== Hybrid RAG 配置 ==========
+    hybrid_rag_enabled: bool = Field(
+        default=True,
+        description="是否启用混合检索 (Qdrant 稠密 + PG BM25 + 结构化过滤 + RRF 融合)",
+    )
+    rrf_k: int = Field(
+        default=60,
+        description="RRF 互惠排序融合阻尼系数 k（标准默认 60）",
+    )
+    sparse_limit_multiplier: int = Field(
+        default=3,
+        description="融合前每路召回倍数（最终 limit × 此值 = 每路上游召回数）",
+    )
+
+    # ========== Harness 容错引擎配置 ==========
+    harness_timeout: float = Field(
+        default=10.0,
+        description="工具执行超时时间（秒）",
+    )
+    harness_max_retries: int = Field(
+        default=2,
+        description="工具执行最大重试次数",
+    )
+    harness_circuit_threshold: int = Field(
+        default=5,
+        description="熔断器连续失败次数阈值",
+    )
+
     # ========== PostgreSQL 配置 ==========
     postgres_host: str = Field(
         default="192.168.150.128",

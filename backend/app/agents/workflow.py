@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import operator
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from datetime import date, timedelta
 from typing import Annotated, Any, TypedDict
 
@@ -24,6 +24,7 @@ from app.models.travel import (
 )
 from app.services.amap import AmapPoi, AmapService
 from app.services.geo_optimizer import geo_optimizer
+from app.services.harness import ToolExecutor, ExecutorConfig, ToolResult, ToolStatus, CircuitBreaker
 from app.services.llm import LlmService
 from app.services.rag import TravelRagService
 
@@ -43,6 +44,41 @@ class TravelState(TypedDict, total=False):
     critique: dict[str, Any]
 
 
+class _WorkflowHarness:
+    """为 Workflow Agent 定制的 Harness 执行器封装
+
+    提供 api_call() 方法，统一处理超时、重试、降级。
+    内部使用 ToolExecutor，预配置针对外部 API 的执行策略。
+    """
+
+    def __init__(self, settings: Settings):
+        self._executor = ToolExecutor(ExecutorConfig(
+            timeout_seconds=settings.harness_timeout or 10.0,
+            max_retries=settings.harness_max_retries if hasattr(settings, "harness_max_retries") else 2,
+            base_backoff_seconds=0.5,
+            backoff_multiplier=2.0,
+            circuit_breaker=CircuitBreaker(failure_threshold=5, recovery_timeout=60.0),
+        ))
+
+    async def api_call(
+        self,
+        func: Callable[..., Coroutine[Any, Any, Any]],
+        args: tuple[Any, ...] = (),
+        fallback: Callable[..., Any] | None = None,
+        tool_name: str = "api",
+        **kwargs: Any,
+    ) -> ToolResult:
+        """执行外部 API 调用（带容错）"""
+        return await self._executor.execute(
+            func,
+            *args,
+            fallback=fallback,
+            fallback_args=None,
+            tool_name=tool_name,
+            **kwargs,
+        )
+
+
 class TravelPlannerWorkflow:
     def __init__(self, settings: Settings | None = None, progress_sink: ProgressSink | None = None):
         self.settings = settings or get_settings()
@@ -50,6 +86,8 @@ class TravelPlannerWorkflow:
         self.amap = AmapService(self.settings)
         self.rag = TravelRagService(self.settings)
         self.llm = LlmService(self.settings)
+        # Harness 容错执行引擎（API 调用统一入口：超时+重试+熔断+降级）
+        self._harness = _WorkflowHarness(settings=self.settings)
         self.graph = self._build_graph()
 
     async def plan(
@@ -99,14 +137,28 @@ class TravelPlannerWorkflow:
     async def _weather_agent(self, state: TravelState) -> TravelState:
         request = state["request"]
         events = [await self._emit("weather", "running", f"查询 {request.destination} 天气")]
-        try:
-            weather = await self.amap.weather(request.destination)
+
+        # 使用 Harness 容错执行引擎：超时 + 重试 + 降级
+        weather_result = await self._harness.api_call(
+            func=self.amap.weather,
+            args=(request.destination,),
+            fallback=lambda: {
+                "city": request.destination,
+                "casts": [],
+                "fallback": True,
+            },
+            tool_name="weather",
+        )
+
+        if weather_result.success:
+            weather = weather_result.data
             summary = self._summarize_weather(weather)
             events.append(await self._emit("weather", "success", summary, {"weather": weather}))
-        except Exception as exc:
+        else:
             weather = {"city": request.destination, "casts": [], "fallback": True}
             summary = "天气服务暂不可用，行程将保留室内/机动备选。"
-            events.append(await self._emit("weather", "error", summary, {"error": str(exc)}))
+            events.append(await self._emit("weather", "error", summary, {"error": weather_result.error}))
+
         return {"context": {"weather": weather, "weather_summary": summary}, "events": events}
 
     async def _transport_agent(self, state: TravelState) -> TravelState:
@@ -124,24 +176,76 @@ class TravelPlannerWorkflow:
     async def _accommodation_agent(self, state: TravelState) -> TravelState:
         request = state["request"]
         events = [await self._emit("accommodation", "running", "检索酒店 POI")]
-        try:
+
+        # 使用 Harness 容错执行引擎：重试 + 降级
+        async def _fetch_hotels():
             hotels = await self.amap.search_pois(request.destination, "酒店", "100000", offset=8)
-            if not hotels:
-                hotels = self.amap.fallback_pois(request.destination, "hotel")
-            events.append(await self._emit("accommodation", "success", f"找到 {len(hotels)} 个住宿候选"))
-        except Exception as exc:
-            hotels = self.amap.fallback_pois(request.destination, "hotel")
-            events.append(await self._emit("accommodation", "error", "酒店检索失败，使用兜底推荐", {"error": str(exc)}))
+            return hotels or self.amap.fallback_pois(request.destination, "hotel")
+
+        hotels_result = await self._harness.api_call(
+            func=_fetch_hotels,
+            fallback=lambda: self.amap.fallback_pois(request.destination, "hotel"),
+            tool_name="accommodation",
+        )
+
+        hotels = hotels_result.data if hotels_result.success else self.amap.fallback_pois(request.destination, "hotel")
+        status = "success" if hotels_result.source == "primary" else "warning"
+        events.append(await self._emit("accommodation", status, f"找到 {len(hotels)} 个住宿候选"))
+
         return {"context": {"hotels": [hotel.__dict__ for hotel in hotels]}, "events": events}
 
     async def _attraction_agent(self, state: TravelState) -> TravelState:
         request = state["request"]
-        events = [await self._emit("attraction", "running", "检索景点 POI 与游记 RAG")]
+        events = [await self._emit("attraction", "running", "检索景点 POI 与游记 RAG（竞速模式）")]
         memory_terms = " ".join(item.get("value", "") for item in state.get("context", {}).get("memory", []))
         query = " ".join(request.interests + ([memory_terms] if memory_terms else [])) or "经典景点"
-        pois_task = self._safe_search_attractions(request.destination, query)
-        notes_task = self.rag.search_notes(request.destination, query)
-        pois, notes = await asyncio.gather(pois_task, notes_task)
+
+        # 竞速策略：高德 POI API 与 Qdrant RAG 并发检索，取最快返回结果
+        pois_task = asyncio.create_task(self._safe_search_attractions(request.destination, query))
+        notes_task = asyncio.create_task(self.rag.search_notes(request.destination, query))
+
+        pois: list[AmapPoi] = []
+        notes: list[dict[str, Any]] = []
+        done, pending = await asyncio.wait(
+            {pois_task, notes_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        # 处理已完成的任务
+        for task in done:
+            try:
+                result = task.result()
+                if task is pois_task:
+                    pois = result
+                else:
+                    notes = result
+            except Exception as exc:
+                events.append(await self._emit("attraction", "warning", f"竞速路径异常: {str(exc)[:50]}"))
+
+        # 等待剩余任务（给予额外超时）
+        if pending:
+            try:
+                extra_done, still_pending = await asyncio.wait(pending, timeout=10.0)
+                for task in extra_done:
+                    try:
+                        result = task.result()
+                        if task is pois_task:
+                            pois = result
+                        else:
+                            notes = result
+                    except Exception as exc:
+                        events.append(await self._emit("attraction", "warning", f"补全路径异常: {str(exc)[:50]}"))
+                if still_pending:
+                    events.append(await self._emit("attraction", "warning", "慢路径超时，使用已竞速结果"))
+            except asyncio.TimeoutError:
+                events.append(await self._emit("attraction", "warning", "慢路径超时，使用已竞速结果"))
+
+        # 确保兜底数据可用（任一路径失败或超时都降级到本地兜底）
+        if not pois:
+            pois = self.amap.fallback_pois(request.destination, "attraction")
+        if not notes:
+            notes = self.rag.fallback_notes(request.destination, query)
+
         advice = await self.llm.scenic_advice(request, notes)
         events.append(
             await self._emit(

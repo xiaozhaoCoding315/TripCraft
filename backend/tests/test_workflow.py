@@ -191,3 +191,67 @@ class TestReviewPlan:
         # Check that budget warning is present (message contains "预算" or "超过")
         budget_comments = [c for c in comments if "预算" in c.message or "超过" in c.message]
         assert len(budget_comments) > 0, f"Expected budget warning but got: {[c.message for c in comments]}"
+
+
+class TestAttractionAgentRacing:
+    """Test attraction agent racing (FIRST_COMPLETED) strategy"""
+
+    @pytest.fixture
+    def settings(self):
+        return Settings(
+            dashscope_api_key=None,
+            qdrant_url="http://localhost:6333",
+            amap_api_key=None,
+        )
+
+    @pytest.fixture
+    def workflow(self, settings):
+        return TravelPlannerWorkflow(settings=settings)
+
+    @pytest.mark.asyncio
+    async def test_racing_returns_results(self, workflow):
+        """Attraction agent should return results even in degraded mode"""
+        request = TravelPlanRequest(
+            destination="杭州",
+            start_date="2026-07-01",
+            days=2,
+            interests=["西湖", "美食"],
+        )
+        initial = {
+            "request": request,
+            "context": {"memory": []},
+            "events": [],
+            "revision_round": 0,
+            "critique": {},
+        }
+        result = await workflow._attraction_agent(initial)
+        assert "attractions" in result["context"]
+        assert "rag_notes" in result["context"]
+        assert isinstance(result["context"]["attractions"], list)
+        assert isinstance(result["context"]["rag_notes"], list)
+
+    @pytest.mark.asyncio
+    async def test_racing_handles_exception_gracefully(self, settings):
+        """Racing strategy should degrade gracefully if one path raises"""
+        workflow = TravelPlannerWorkflow(settings=settings)
+        # Mock _safe_search_attractions to raise
+        async def failing_search(city, query):
+            raise RuntimeError("API down")
+        workflow._safe_search_attractions = failing_search
+
+        request = TravelPlanRequest(
+            destination="杭州",
+            start_date="2026-07-01",
+            days=1,
+        )
+        initial = {
+            "request": request,
+            "context": {"memory": []},
+            "events": [],
+            "revision_round": 0,
+            "critique": {},
+        }
+        result = await workflow._attraction_agent(initial)
+        # Should still have fallback data
+        assert "attractions" in result["context"]
+        assert len(result["context"]["attractions"]) > 0  # fallback POIs
